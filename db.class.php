@@ -31,13 +31,14 @@ class DB {
   public static $param_char = '%';
   public static $named_param_seperator = '_';
   public static $nested_transactions = false;
-  public static $ssl = array('key' => '', 'cert' => '', 'ca_cert' => '', 'ca_path' => '', 'cipher' => '');
+  public static $ssl = null;
   public static $connect_options = array(\MYSQLI_OPT_CONNECT_TIMEOUT => 30);
+  public static $connect_flags = 0;
   public static $logfile;
   
   // internal
   protected static $mdb = null;
-  public static $variables_to_sync = array('param_char', 'named_param_seperator', 'nested_transactions', 'ssl', 'connect_options', 'logfile');
+  public static $variables_to_sync = array('param_char', 'named_param_seperator', 'nested_transactions', 'ssl', 'connect_options', 'connect_flags', 'logfile');
   
   public static function getMDB() {
     $mdb = DB::$mdb;
@@ -83,8 +84,9 @@ class MeekroDB {
   public $param_char = '%';
   public $named_param_seperator = '_';
   public $nested_transactions = false;
-  public $ssl = array('key' => '', 'cert' => '', 'ca_cert' => '', 'ca_path' => '', 'cipher' => '');
+  public $ssl = null;
   public $connect_options = array(\MYSQLI_OPT_CONNECT_TIMEOUT => 30);
+  public $connect_flags = 0;
   public $logfile;
   
   // internal
@@ -142,11 +144,15 @@ class MeekroDB {
       $this->current_db = $this->dbName;
       $mysql = new \MySQLi();
 
-      $connect_flags = 0;
-      if ($this->ssl['key']) {
-        $mysql->ssl_set($this->ssl['key'], $this->ssl['cert'], $this->ssl['ca_cert'], $this->ssl['ca_path'], $this->ssl['cipher']);
+      $connect_flags = $this->connect_flags;
+      if (is_array($this->ssl)) {
+        // PHP produces a warning when trying to access undefined array keys
+        $ssl_default = array('key' => NULL, 'cert' => NULL, 'ca_cert' => NULL, 'ca_path' => NULL, 'cipher' => NULL);
+        $ssl = array_merge($ssl_default, $this->ssl);
+        $mysql->ssl_set($ssl['key'], $ssl['cert'], $ssl['ca_cert'], $ssl['ca_path'], $ssl['cipher']);
         $connect_flags |= \MYSQLI_CLIENT_SSL;
-      } 
+      }
+
       foreach ($this->connect_options as $key => $value) {
         $mysql->options($key, $value);
       }
@@ -486,7 +492,7 @@ class MeekroDB {
       $columns[$row['Field']] = array(
         'type' => $row['Type'],
         'null' => $row['Null'],
-        'key' => $row['Type'],
+        'key' => $row['Key'],
         'default' => $row['Default'],
         'extra' => $row['Extra']
       );
@@ -778,9 +784,10 @@ class MeekroDB {
 
     $opts_fullcols = (isset($opts['fullcols']) && $opts['fullcols']);
     $opts_raw = (isset($opts['raw']) && $opts['raw']);
+    $opts_unbuf = (isset($opts['unbuf']) && $opts['unbuf']);
     $opts_assoc = (isset($opts['assoc']) && $opts['assoc']);
     $opts_walk = (isset($opts['walk']) && $opts['walk']);
-    $is_buffered = !($opts_raw || $opts_walk);
+    $is_buffered = !($opts_unbuf || $opts_walk);
 
     list($query, $args) = $this->runHook('pre_parse', array('query' => $query, 'args' => $args));    
     $sql = call_user_func_array(array($this, 'parse'), array_merge(array($query), $args));
@@ -898,6 +905,7 @@ class MeekroDB {
   }
 
   public function queryRaw() { return $this->queryHelper(array('raw' => true), func_get_args()); }
+  public function queryRawUnbuf() { return $this->queryHelper(array('raw' => true, 'unbuf' => true), func_get_args()); }
   public function queryOneList() { return call_user_func_array(array($this, 'queryFirstList'), func_get_args()); }
   public function queryOneRow() { return call_user_func_array(array($this, 'queryFirstRow'), func_get_args()); }
 
@@ -941,7 +949,7 @@ class MeekroDBWalk {
   protected $mysqli;
   protected $result;
 
-  function __construct(\MySQLi $mysqli, $result) {
+  function __construct(MySQLi $mysqli, $result) {
     $this->mysqli = $mysqli;
     $this->result = $result;
   }
